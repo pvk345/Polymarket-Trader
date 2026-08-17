@@ -101,11 +101,13 @@ function getMarketStatus(): { isOpen: boolean; label: string; countdown: string;
 }
 
 function MarketHoursIndicator() {
-  const [status, setStatus] = useState(getMarketStatus());
+  const [status, setStatus] = useState<ReturnType<typeof getMarketStatus> | null>(null);
   useEffect(() => {
+    setStatus(getMarketStatus());
     const t = setInterval(() => setStatus(getMarketStatus()), 1000);
     return () => clearInterval(t);
   }, []);
+  if (!status) return null; // real time is only known client-side — avoids SSR/hydration mismatch
   return (
     <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono ${
       status.isOpen ? "border-[#00C48C]/30 bg-[#00C48C]/10 text-[#00C48C]"
