@@ -24,7 +24,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres.fhzjyjeepzbgfabdoikr:d%25h5-%25YsLTr%3FC%2FF@aws-0-us-west-2.pooler.supabase.com:6543/postgres
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379
       - ALPACA_API_KEY=${ALPACA_API_KEY}
       - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY}
