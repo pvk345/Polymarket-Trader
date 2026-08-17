@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Script from "next/script";
 import { Zap, AlertTriangle, Eye, EyeOff } from "lucide-react";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,6 +16,48 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [googleReady, setGoogleReady] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement>(null);
+
+  async function handleGoogleCredential(response: { credential: string }) {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API}/api/auth/google`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential: response.credential }),
+      });
+      if (!r.ok) {
+        const err = await r.json();
+        throw new Error(err.detail || "Google sign-in failed");
+      }
+      const data = await r.json();
+      localStorage.setItem("token", data.access_token);
+      localStorage.setItem("username", data.username);
+      router.push("/");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!googleReady || !GOOGLE_CLIENT_ID) return;
+    const google = (window as any).google;
+    if (!google || !googleButtonRef.current) return;
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential,
+    });
+    google.accounts.id.renderButton(googleButtonRef.current, {
+      theme: "outline",
+      size: "large",
+      width: 328,
+      text: "continue_with",
+    });
+  }, [googleReady]);
 
   async function handleSubmit() {
     if (!username || !password) { setError("Username and password are required."); return; }
@@ -65,6 +109,13 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-[#0D1117] flex items-center justify-center px-4">
+      {GOOGLE_CLIENT_ID && (
+        <Script
+          src="https://accounts.google.com/gsi/client"
+          strategy="afterInteractive"
+          onReady={() => setGoogleReady(true)}
+        />
+      )}
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
@@ -77,6 +128,19 @@ export default function LoginPage() {
 
         {/* Card */}
         <div className="bg-[#161B22] border border-[#30363D] rounded-xl p-6">
+          {GOOGLE_CLIENT_ID && (
+            <>
+              <div className="flex justify-center mb-4">
+                <div ref={googleButtonRef} />
+              </div>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="h-px bg-[#30363D] flex-1" />
+                <span className="text-[#8B949E] text-xs">or</span>
+                <div className="h-px bg-[#30363D] flex-1" />
+              </div>
+            </>
+          )}
+
           {/* Mode toggle */}
           <div className="flex bg-[#0D1117] rounded-lg p-1 mb-6">
             <button

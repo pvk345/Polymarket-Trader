@@ -1,6 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
 import bcrypt
 from pydantic import BaseModel
 from datetime import datetime, timedelta
@@ -17,16 +19,36 @@ def create_users_table():
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) UNIQUE NOT NULL,
-                hashed_password TEXT NOT NULL,
+                hashed_password TEXT,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """))
         conn.commit()
 
+        # Google sign-in support — added alongside the original password-only schema
+        for col, col_type in [("google_id", "VARCHAR(255)"), ("email", "VARCHAR(255)")]:
+            try:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {col_type}"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        try:
+            conn.execute(text("ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS users_google_id_idx ON users (google_id)"))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-def verify_password(plain: str, hashed: str) -> bool:
+def verify_password(plain: str, hashed: str | None) -> bool:
+    if not hashed:
+        return False  # Google-only accounts have no password to check against
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 def create_token(username: str) -> str:
@@ -45,6 +67,46 @@ def get_user(username: str) -> dict | None:
         ).fetchone()
     return {"username": row[0], "hashed_password": row[1]} if row else None
 
+def get_or_create_google_user(google_id: str, email: str | None, email_verified: bool) -> str:
+    """Find the username for this Google account, linking to an existing
+    password account with a matching verified email, or creating a fresh one."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT username FROM users WHERE google_id = :gid"), {"gid": google_id}
+        ).fetchone()
+        if row:
+            return row[0]
+
+        # Only auto-link to an existing username/password account if Google
+        # has actually verified the email — otherwise this would let anyone
+        # claim an account just by typing someone else's email into Google.
+        if email and email_verified:
+            row = conn.execute(
+                text("SELECT username FROM users WHERE email = :email"), {"email": email}
+            ).fetchone()
+            if row:
+                username = row[0]
+                conn.execute(
+                    text("UPDATE users SET google_id = :gid WHERE username = :u"),
+                    {"gid": google_id, "u": username}
+                )
+                conn.commit()
+                return username
+
+        base_username = (email.split("@")[0] if email else f"google_{google_id[:8]}")[:45]
+        username = base_username
+        suffix = 1
+        while conn.execute(text("SELECT 1 FROM users WHERE username = :u"), {"u": username}).fetchone():
+            username = f"{base_username}{suffix}"
+            suffix += 1
+
+        conn.execute(
+            text("INSERT INTO users (username, hashed_password, google_id, email) VALUES (:u, NULL, :gid, :email)"),
+            {"u": username, "gid": google_id, "email": email}
+        )
+        conn.commit()
+        return username
+
 def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
@@ -59,6 +121,9 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
 class RegisterRequest(BaseModel):
     username: str
     password: str
+
+class GoogleAuthRequest(BaseModel):
+    credential: str
 
 class LoginResponse(BaseModel):
     access_token: str
@@ -92,6 +157,26 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
     token = create_token(form.username)
     print(f"✅ Login: {form.username}", flush=True)
     return LoginResponse(access_token=token, token_type="bearer", username=form.username)
+
+@router.post("/auth/google", response_model=LoginResponse)
+def google_login(req: GoogleAuthRequest):
+    if not settings.google_client_id:
+        raise HTTPException(status_code=500, detail="Google sign-in is not configured on this server")
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            req.credential, google_requests.Request(), settings.google_client_id
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+
+    google_id = idinfo["sub"]
+    email = idinfo.get("email")
+    email_verified = bool(idinfo.get("email_verified", False))
+
+    username = get_or_create_google_user(google_id, email, email_verified)
+    token = create_token(username)
+    print(f"✅ Google sign-in: {username}", flush=True)
+    return LoginResponse(access_token=token, token_type="bearer", username=username)
 
 @router.get("/auth/me")
 def get_me(current_user: str = Depends(get_current_user)):
