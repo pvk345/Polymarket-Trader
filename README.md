@@ -3,6 +3,7 @@
 A full-stack automated paper trading platform that correlates Polymarket prediction market probabilities with stock trades via the Alpaca API — with a standalone AWS Lambda evaluator that keeps trading on schedule even when the web app isn't running.
 
 **Live Demo:** https://frontend-delta-fawn-63.vercel.app
+
 **Backend API:** https://polymarket-trader-85w9.onrender.com/docs
 
 ## What It Does
