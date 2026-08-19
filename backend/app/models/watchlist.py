@@ -9,6 +9,7 @@ class WatchlistItem(Base):
     __tablename__ = "watchlist"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)  # NULL = legacy/shared item, visible to all
     ticker = Column(String(20), nullable=False)
     label = Column(String(200), nullable=True)
     alert_above = Column(Float, nullable=True)   # alert when price rises above this

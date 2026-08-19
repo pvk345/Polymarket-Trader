@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
@@ -7,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 from app.core.database import get_db
 from app.models.watchlist import WatchlistItem
+from app.api.auth import get_current_user_id
+from app.services.notifications import notify_rule_event
 
 router = APIRouter()
 
@@ -72,12 +75,18 @@ def _get_price(ticker: str) -> float | None:
 
 
 @router.get("/watchlist")
-def get_watchlist(db: Session = Depends(get_db)):
-    items = db.query(WatchlistItem).order_by(WatchlistItem.created_at.desc()).all()
+def get_watchlist(db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+    items = (
+        db.query(WatchlistItem)
+        .filter(or_(WatchlistItem.user_id == user_id, WatchlistItem.user_id.is_(None)))
+        .order_by(WatchlistItem.created_at.desc())
+        .all()
+    )
     return {
         "items": [
             {
                 "id": i.id,
+                "owned_by_me": i.user_id == user_id,
                 "ticker": i.ticker,
                 "label": i.label,
                 "alert_above": i.alert_above,
@@ -96,10 +105,11 @@ def get_watchlist(db: Session = Depends(get_db)):
 
 
 @router.post("/watchlist")
-def add_to_watchlist(item: WatchlistCreate, db: Session = Depends(get_db)):
+def add_to_watchlist(item: WatchlistCreate, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     price = _get_price(item.ticker.upper())
 
     db_item = WatchlistItem(
+        user_id=user_id,
         ticker=item.ticker.upper(),
         label=item.label or item.ticker.upper(),
         alert_above=item.alert_above,
@@ -118,20 +128,24 @@ def add_to_watchlist(item: WatchlistCreate, db: Session = Depends(get_db)):
 
 
 @router.delete("/watchlist/{item_id}")
-def remove_from_watchlist(item_id: int, db: Session = Depends(get_db)):
+def remove_from_watchlist(item_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.user_id is not None and item.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You don't have permission to remove this item")
     db.delete(item)
     db.commit()
     return {"message": "Removed from watchlist"}
 
 
 @router.patch("/watchlist/{item_id}/reset-alert")
-def reset_alert(item_id: int, db: Session = Depends(get_db)):
+def reset_alert(item_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.user_id is not None and item.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You don't have permission to modify this item")
     item.alert_triggered = False
     item.alert_triggered_at = None
     db.commit()
@@ -178,6 +192,11 @@ def refresh_prices(db: Session = Depends(get_db)):
                     "threshold": item.alert_above,
                 })
                 print(f"🔔 PRICE ALERT: {item.ticker} hit ${price:.2f} (above ${item.alert_above:.2f})", flush=True)
+                notify_rule_event(
+                    item.user_id,
+                    f"Price alert: {item.ticker}",
+                    f"{item.ticker} hit ${price:.2f} (above your ${item.alert_above:.2f} threshold)",
+                )
 
             elif item.alert_below is not None and price <= item.alert_below:
                 item.alert_triggered = True
@@ -190,6 +209,11 @@ def refresh_prices(db: Session = Depends(get_db)):
                     "threshold": item.alert_below,
                 })
                 print(f"🔔 PRICE ALERT: {item.ticker} hit ${price:.2f} (below ${item.alert_below:.2f})", flush=True)
+                notify_rule_event(
+                    item.user_id,
+                    f"Price alert: {item.ticker}",
+                    f"{item.ticker} hit ${price:.2f} (below your ${item.alert_below:.2f} threshold)",
+                )
 
     db.commit()
     return {

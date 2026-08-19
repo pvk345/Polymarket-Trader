@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
 
 from models import WatchlistItem
+from notifications import notify_rule_event
 
 ALPACA_API_KEY = os.environ["ALPACA_API_KEY"]
 ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
@@ -90,6 +91,12 @@ def check_watchlist_alerts(db: Session) -> list[dict]:
                     "ticker": item.ticker, "label": item.label, "price": price,
                     "trigger": "above", "threshold": item.alert_above,
                 })
+                notify_rule_event(
+                    item.user_id,
+                    f"Price alert: {item.ticker}",
+                    f"{item.ticker} hit ${price:.2f} (above your ${item.alert_above:.2f} threshold)",
+                    db,
+                )
             elif item.alert_below is not None and price <= item.alert_below:
                 item.alert_triggered = True
                 item.alert_triggered_at = datetime.utcnow()
@@ -97,6 +104,12 @@ def check_watchlist_alerts(db: Session) -> list[dict]:
                     "ticker": item.ticker, "label": item.label, "price": price,
                     "trigger": "below", "threshold": item.alert_below,
                 })
+                notify_rule_event(
+                    item.user_id,
+                    f"Price alert: {item.ticker}",
+                    f"{item.ticker} hit ${price:.2f} (below your ${item.alert_below:.2f} threshold)",
+                    db,
+                )
 
     db.commit()
     return alerts_fired

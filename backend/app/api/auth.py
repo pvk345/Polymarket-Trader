@@ -118,9 +118,25 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
         raise HTTPException(status_code=401, detail="Invalid or expired token",
                             headers={"WWW-Authenticate": "Bearer"})
 
+def get_current_user_id(username: str = Depends(get_current_user)) -> int:
+    """Numeric user id for the logged-in user, used to scope ownership of rules/watchlist items."""
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT id FROM users WHERE username = :u"), {"u": username}).fetchone()
+    if not row:
+        raise HTTPException(status_code=401, detail="User not found")
+    return row[0]
+
+def get_user_email(user_id: int) -> str | None:
+    """Email for a given user id, or None if they have none on file (e.g. older
+    password-only accounts registered before email was required)."""
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT email FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+    return row[0] if row else None
+
 class RegisterRequest(BaseModel):
     username: str
     password: str
+    email: str
 
 class GoogleAuthRequest(BaseModel):
     credential: str
@@ -136,13 +152,15 @@ def register(req: RegisterRequest):
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if "@" not in req.email or "." not in req.email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
     if get_user(req.username):
         raise HTTPException(status_code=400, detail="Username already taken")
     hashed = hash_password(req.password)
     with engine.connect() as conn:
         conn.execute(
-            text("INSERT INTO users (username, hashed_password) VALUES (:u, :h)"),
-            {"u": req.username, "h": hashed}
+            text("INSERT INTO users (username, hashed_password, email) VALUES (:u, :h, :e)"),
+            {"u": req.username, "h": hashed, "e": req.email}
         )
         conn.commit()
     token = create_token(req.username)

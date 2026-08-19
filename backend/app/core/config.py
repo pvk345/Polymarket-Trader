@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
     google_client_id: str = ""
+    resend_api_key: str = ""
+    notification_email: str = ""
 
     class Config:
         env_file = ".env"

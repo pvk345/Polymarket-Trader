@@ -33,6 +33,8 @@ def create_tables():
         ("rules", "market_id", "VARCHAR(50)"),
         ("rules", "market_question", "TEXT"),
         ("rules", "market_ids", "TEXT"),
+        ("rules", "user_id", "INTEGER"),
+        ("watchlist", "user_id", "INTEGER"),
     ]
 
     with engine.connect() as conn:

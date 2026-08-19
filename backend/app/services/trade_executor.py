@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.rules import TriggerLog, TradeGuard, Rule
 from app.services.position_sizer import calculate_position_size, confidence_label
+from app.services.notifications import notify_rule_event
 
 
 def is_market_open() -> bool:
@@ -195,6 +196,11 @@ def execute_trade(trigger: dict, log: TriggerLog, db: Session) -> bool:
             f"   Order ID: {order_id}\n",
             flush=True,
         )
+        notify_rule_event(
+            rule.user_id if rule else None,
+            f"Rule triggered: {trigger['rule_name']}",
+            f"{action.upper()} {sized_qty} shares of {ticker} at {probability:.1f}% probability. Order ID: {order_id}",
+        )
         return True
     else:
         log.execution_error = error
@@ -251,6 +257,11 @@ def execute_exit(rule: Rule, reason: str, db: Session) -> bool:
         _update_guard(rule.id, ticker, db)
         db.commit()
         print(f"✅ EXIT EXECUTED: [{rule.name}] Order ID: {order_id}\n", flush=True)
+        notify_rule_event(
+            rule.user_id,
+            f"Rule exited: {rule.name}",
+            f"{exit_action.upper()} {quantity} shares of {ticker}. Reason: {reason}. Order ID: {order_id}",
+        )
         return True
     else:
         db.commit()

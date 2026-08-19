@@ -13,6 +13,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +62,7 @@ export default function LoginPage() {
 
   async function handleSubmit() {
     if (!username || !password) { setError("Username and password are required."); return; }
+    if (mode === "register" && !email) { setError("Email is required."); return; }
     setLoading(true);
     setError(null);
     try {
@@ -85,7 +87,7 @@ export default function LoginPage() {
         const r = await fetch(`${API}/api/auth/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username, password, email }),
         });
         if (!r.ok) {
           const err = await r.json();
@@ -171,6 +173,22 @@ export default function LoginPage() {
                 className="w-full bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-[#00C48C] placeholder-[#8B949E] transition-colors"
               />
             </div>
+
+            {mode === "register" && (
+              <div>
+                <label className="text-xs text-[#8B949E] mb-1.5 block">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  className="w-full bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-[#00C48C] placeholder-[#8B949E] transition-colors"
+                />
+                <p className="text-[#8B949E] text-xs mt-1">Used for rule/alert notifications only.</p>
+              </div>
+            )}
 
             <div>
               <label className="text-xs text-[#8B949E] mb-1.5 block">Password</label>

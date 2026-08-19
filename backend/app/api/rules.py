@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from pydantic import BaseModel, Field
 from typing import Optional, List
 import json
 from app.core.database import get_db
 from app.models.rules import Rule, TriggerLog
+from app.api.auth import get_current_user_id
 
 router = APIRouter()
 
@@ -43,12 +45,18 @@ class RuleCreate(BaseModel):
 
 
 @router.get("/rules")
-def get_rules(db: Session = Depends(get_db)):
-    rules = db.query(Rule).order_by(Rule.created_at.desc()).all()
+def get_rules(db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+    rules = (
+        db.query(Rule)
+        .filter(or_(Rule.user_id == user_id, Rule.user_id.is_(None)))
+        .order_by(Rule.created_at.desc())
+        .all()
+    )
     return {
         "rules": [
             {
                 "id": r.id,
+                "owned_by_me": r.user_id == user_id,
                 "name": r.name,
                 "keyword": r.keyword,
                 "market_id": r.market_id,
@@ -209,7 +217,7 @@ def _validate_rule_payload(rule: RuleCreate):
 
 
 @router.post("/rules")
-def create_rule(rule: RuleCreate, db: Session = Depends(get_db)):
+def create_rule(rule: RuleCreate, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     _validate_rule_payload(rule)
 
     # Dynamic sizing scales against a single threshold — meaningless (and unsafe) for
@@ -217,6 +225,7 @@ def create_rule(rule: RuleCreate, db: Session = Depends(get_db)):
     use_dynamic_sizing = rule.use_dynamic_sizing and not rule.market_ids
 
     db_rule = Rule(
+        user_id=user_id,
         name=rule.name,
         keyword=rule.keyword,
         market_id=rule.market_id,
@@ -246,10 +255,12 @@ def create_rule(rule: RuleCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/rules/{rule_id}")
-def update_rule(rule_id: int, rule: RuleCreate, db: Session = Depends(get_db)):
+def update_rule(rule_id: int, rule: RuleCreate, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     db_rule = db.query(Rule).filter(Rule.id == rule_id).first()
     if not db_rule:
         raise HTTPException(status_code=404, detail="Rule not found")
+    if db_rule.user_id is not None and db_rule.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You don't have permission to edit this rule")
 
     _validate_rule_payload(rule)
     use_dynamic_sizing = rule.use_dynamic_sizing and not rule.market_ids
@@ -297,20 +308,24 @@ def preview_size(
 
 
 @router.delete("/rules/{rule_id}")
-def delete_rule(rule_id: int, db: Session = Depends(get_db)):
+def delete_rule(rule_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     rule = db.query(Rule).filter(Rule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
+    if rule.user_id is not None and rule.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You don't have permission to delete this rule")
     db.delete(rule)
     db.commit()
     return {"message": "Rule deleted"}
 
 
 @router.patch("/rules/{rule_id}/toggle")
-def toggle_rule(rule_id: int, db: Session = Depends(get_db)):
+def toggle_rule(rule_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     rule = db.query(Rule).filter(Rule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
+    if rule.user_id is not None and rule.user_id != user_id:
+        raise HTTPException(status_code=403, detail="You don't have permission to modify this rule")
     rule.active = not rule.active
     db.commit()
     return {"message": f"Rule {'activated' if rule.active else 'paused'}", "active": rule.active}

@@ -30,6 +30,8 @@ services:
       - ALPACA_SECRET_KEY=${ALPACA_SECRET_KEY}
       - ALPACA_PAPER=true
       - GOOGLE_CLIENT_ID=797409411898-nnc25vmc1euqpv4au05l7vkdq67f9ofg.apps.googleusercontent.com
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL}
     depends_on:
       - redis
     volumes:

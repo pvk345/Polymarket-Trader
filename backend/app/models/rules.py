@@ -9,6 +9,7 @@ class Rule(Base):
     __tablename__ = "rules"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=True, index=True)  # NULL = legacy/shared rule, visible to all
     name = Column(String(200), nullable=False)
     keyword = Column(String(200), nullable=True)
     market_id = Column(String(50), nullable=True)      # Polymarket market ID — if set, rule is pinned to this exact market

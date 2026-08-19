@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from models import TriggerLog, TradeGuard, Rule
 from position_sizer import calculate_position_size, confidence_label
 from settings import get_setting
+from notifications import notify_rule_event
 
 ALPACA_API_KEY = os.environ["ALPACA_API_KEY"]
 ALPACA_SECRET_KEY = os.environ["ALPACA_SECRET_KEY"]
@@ -149,6 +150,12 @@ def execute_trade(trigger: dict, log: TriggerLog, db: Session) -> bool:
         db.commit()
 
         print(f"ENTRY EXECUTED: [{trigger['rule_name']}] {action.upper()} {sized_qty} shares of {ticker} @ order {order_id}")
+        notify_rule_event(
+            rule.user_id if rule else None,
+            f"Rule triggered: {trigger['rule_name']}",
+            f"{action.upper()} {sized_qty} shares of {ticker} at {probability:.1f}% probability. Order ID: {order_id}",
+            db,
+        )
         return True
     else:
         log.execution_error = error
@@ -189,6 +196,12 @@ def execute_exit(rule: Rule, reason: str, db: Session) -> bool:
         _update_guard(rule.id, ticker, db)
         db.commit()
         print(f"EXIT EXECUTED: [{rule.name}] order {order_id}")
+        notify_rule_event(
+            rule.user_id,
+            f"Rule exited: {rule.name}",
+            f"{exit_action.upper()} {quantity} shares of {ticker}. Reason: {reason}. Order ID: {order_id}",
+            db,
+        )
         return True
     else:
         db.commit()
