@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import time
 from app.core.database import get_db
 from app.models.watchlist import WatchlistItem
 
@@ -138,12 +140,26 @@ def reset_alert(item_id: int, db: Session = Depends(get_db)):
 
 @router.post("/watchlist/refresh")
 def refresh_prices(db: Session = Depends(get_db)):
-    """Fetch latest prices for all watchlist items and check alert thresholds."""
+    """Fetch latest prices for all watchlist items and check alert thresholds.
+
+    Prices are fetched concurrently, not one ticker at a time — each _get_price
+    call is a blocking network request (Alpaca, falling back to yfinance), and
+    none of them depend on each other, so a thread pool lets all of them be
+    in flight at once instead of waiting on each one in turn.
+    """
     items = db.query(WatchlistItem).filter(WatchlistItem.active == True).all()
     alerts_fired = []
 
-    for item in items:
-        price = _get_price(item.ticker)
+    if not items:
+        return {"refreshed": 0, "alerts_fired": []}
+
+    start = time.monotonic()
+    with ThreadPoolExecutor(max_workers=min(len(items), 10)) as executor:
+        prices = list(executor.map(_get_price, [item.ticker for item in items]))
+    elapsed = time.monotonic() - start
+    print(f"🧵 Watchlist refresh: fetched {len(items)} ticker(s) concurrently in {elapsed:.2f}s", flush=True)
+
+    for item, price in zip(items, prices):
         if price is None:
             continue
 

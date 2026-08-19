@@ -5,3 +5,4 @@ numpy==1.26.4
 pandas==2.2.2
 alpaca-py==0.20.0
 pytz==2024.1
+yfinance==0.2.40

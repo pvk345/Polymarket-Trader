@@ -7,6 +7,7 @@ from models import Rule
 from settings import get_setting
 from polymarket import fetch_markets_raw, fetch_specific_markets, enrich_markets
 from rule_evaluator import evaluate_rules
+from watchlist_checker import check_watchlist_alerts
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -55,7 +56,15 @@ def handler(event, context):
         enriched = enrich_markets(markets_raw)
         triggers = evaluate_rules(enriched, db)
 
-        result = {"markets_evaluated": len(enriched), "triggers": len(triggers), "trigger_details": triggers}
+        watchlist_alerts = check_watchlist_alerts(db)
+
+        result = {
+            "markets_evaluated": len(enriched),
+            "triggers": len(triggers),
+            "trigger_details": triggers,
+            "watchlist_alerts": len(watchlist_alerts),
+            "watchlist_alert_details": watchlist_alerts,
+        }
         print(json.dumps(result, default=str))
         return result
     finally:
