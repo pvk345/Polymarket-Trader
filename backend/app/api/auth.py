@@ -4,6 +4,7 @@ from jose import JWTError, jwt
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
 import bcrypt
+import secrets
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from sqlalchemy import text
@@ -12,6 +13,8 @@ from app.core.database import engine
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+GUEST_USERNAME = "guest"
 
 def create_users_table():
     with engine.connect() as conn:
@@ -175,6 +178,24 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
     token = create_token(form.username)
     print(f"✅ Login: {form.username}", flush=True)
     return LoginResponse(access_token=token, token_type="bearer", username=form.username)
+
+@router.post("/auth/guest", response_model=LoginResponse)
+def guest_login():
+    """Logs into a single shared, auto-provisioned 'guest' account, so a demo
+    visitor (e.g. from a resume link) can explore full functionality without
+    registering. The account gets a random, never-shared password, so it can
+    only ever be reached through this endpoint, never the normal login form."""
+    if not get_user(GUEST_USERNAME):
+        hashed = hash_password(secrets.token_urlsafe(32))
+        with engine.connect() as conn:
+            conn.execute(
+                text("INSERT INTO users (username, hashed_password) VALUES (:u, :h)"),
+                {"u": GUEST_USERNAME, "h": hashed}
+            )
+            conn.commit()
+    token = create_token(GUEST_USERNAME)
+    print("✅ Guest login", flush=True)
+    return LoginResponse(access_token=token, token_type="bearer", username=GUEST_USERNAME)
 
 @router.post("/auth/google", response_model=LoginResponse)
 def google_login(req: GoogleAuthRequest):

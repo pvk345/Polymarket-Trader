@@ -44,6 +44,26 @@ export default function LoginPage() {
     }
   }
 
+  async function handleGuestLogin() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`${API}/api/auth/guest`, { method: "POST" });
+      if (!r.ok) {
+        const err = await r.json();
+        throw new Error(err.detail || "Guest login failed");
+      }
+      const data = await r.json();
+      localStorage.setItem("token", data.access_token);
+      localStorage.setItem("username", data.username);
+      router.push("/");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!googleReady || !GOOGLE_CLIENT_ID) return;
     const google = (window as any).google;
@@ -224,6 +244,13 @@ export default function LoginPage() {
               {loading
                 ? mode === "login" ? "Signing in..." : "Creating account..."
                 : mode === "login" ? "Sign In" : "Create Account"}
+            </button>
+
+            <button
+              onClick={handleGuestLogin}
+              disabled={loading}
+              className="w-full bg-transparent hover:bg-[#0D1117] disabled:opacity-50 text-[#8B949E] hover:text-white border border-[#30363D] font-medium rounded-lg py-2.5 text-sm transition-colors">
+              Continue as Guest
             </button>
           </div>
         </div>
