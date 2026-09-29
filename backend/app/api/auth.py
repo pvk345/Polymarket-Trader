@@ -6,6 +6,7 @@ from google.auth.transport import requests as google_requests
 import bcrypt
 import secrets
 from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime, timedelta
 from sqlalchemy import text
 from app.core.config import settings
@@ -136,10 +137,24 @@ def get_user_email(user_id: int) -> str | None:
         row = conn.execute(text("SELECT email FROM users WHERE id = :id"), {"id": user_id}).fetchone()
     return row[0] if row else None
 
+def get_username_by_id(user_id: int) -> str | None:
+    with engine.connect() as conn:
+        row = conn.execute(text("SELECT username FROM users WHERE id = :id"), {"id": user_id}).fetchone()
+    return row[0] if row else None
+
+def get_alpaca_credentials(username: str | None) -> tuple[str, str]:
+    """Alpaca key/secret to trade with for a given username. The guest account
+    trades against its own isolated paper account (when configured) so a demo
+    visitor can never see or touch the primary account's real paper positions,
+    orders, or balance."""
+    if username == GUEST_USERNAME and settings.alpaca_guest_api_key:
+        return settings.alpaca_guest_api_key, settings.alpaca_guest_secret_key
+    return settings.alpaca_api_key, settings.alpaca_secret_key
+
 class RegisterRequest(BaseModel):
     username: str
     password: str
-    email: str
+    email: Optional[str] = None
 
 class GoogleAuthRequest(BaseModel):
     credential: str
@@ -155,7 +170,7 @@ def register(req: RegisterRequest):
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
-    if "@" not in req.email or "." not in req.email.split("@")[-1]:
+    if req.email and ("@" not in req.email or "." not in req.email.split("@")[-1]):
         raise HTTPException(status_code=400, detail="Enter a valid email address")
     if get_user(req.username):
         raise HTTPException(status_code=400, detail="Username already taken")

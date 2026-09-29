@@ -3,7 +3,16 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Script from "next/script";
-import { Zap, AlertTriangle, Eye, EyeOff } from "lucide-react";
+import { Zap, AlertTriangle, Eye, EyeOff, TrendingUp, Target, Clock, BarChart3, Bell, Users, X } from "lucide-react";
+
+const FEATURES = [
+  { icon: TrendingUp, title: "Live market tracking", text: "Polls up to 500 Polymarket prediction markets every 30 seconds for probability shifts." },
+  { icon: Target, title: "Automated rule engine", text: "Keyword, exact-market, or multi-market AND conditions auto-trigger stock trades via Alpaca." },
+  { icon: BarChart3, title: "Backtesting engine", text: "Validate a rule idea against historical Polymarket and stock price data before going live." },
+  { icon: Clock, title: "Always-on evaluator", text: "An independent AWS Lambda checks every rule on its own schedule, even when this app is closed." },
+  { icon: Bell, title: "Watchlist & alerts", text: "Track any ticker with custom price thresholds and real-time email notifications." },
+  { icon: Users, title: "Multi-account support", text: "Each account gets its own private rules and watchlist, with JWT-secured auth." },
+];
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
@@ -18,6 +27,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [googleReady, setGoogleReady] = useState(false);
+  const [showFeatures, setShowFeatures] = useState(true);
   const googleButtonRef = useRef<HTMLDivElement>(null);
 
   async function handleGoogleCredential(response: { credential: string }) {
@@ -82,7 +92,6 @@ export default function LoginPage() {
 
   async function handleSubmit() {
     if (!username || !password) { setError("Username and password are required."); return; }
-    if (mode === "register" && !email) { setError("Email is required."); return; }
     setLoading(true);
     setError(null);
     try {
@@ -107,7 +116,7 @@ export default function LoginPage() {
         const r = await fetch(`${API}/api/auth/register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, password, email }),
+          body: JSON.stringify({ username, password, email: email || null }),
         });
         if (!r.ok) {
           const err = await r.json();
@@ -131,6 +140,46 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-[#0D1117] flex items-center justify-center px-4">
+      {showFeatures && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center px-4">
+          <div className="w-full max-w-lg bg-[#161B22] border border-[#30363D] rounded-xl p-6 relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setShowFeatures(false)}
+              className="absolute top-4 right-4 text-[#8B949E] hover:text-white transition-colors">
+              <X size={18} />
+            </button>
+            <div className="flex flex-col items-center mb-6 text-center">
+              <div className="w-12 h-12 bg-[#00C48C] rounded-xl flex items-center justify-center mb-3">
+                <Zap size={24} className="text-black" />
+              </div>
+              <h2 className="text-white font-bold text-xl">What Polymarket Trader does</h2>
+              <p className="text-[#8B949E] text-sm mt-1">A full-stack automated trading platform — here's everything it can do.</p>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3 mb-6">
+              {FEATURES.map(({ icon: Icon, title, text }) => (
+                <div key={title} className="flex gap-3 bg-[#0D1117] border border-[#30363D] rounded-lg p-3">
+                  <Icon size={18} className="text-[#00C48C] shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-white text-sm font-medium">{title}</p>
+                    <p className="text-[#8B949E] text-xs mt-0.5">{text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => { setShowFeatures(false); handleGuestLogin(); }}
+              disabled={loading}
+              className="w-full bg-[#00C48C] hover:bg-[#00a876] disabled:opacity-50 text-black font-semibold rounded-lg py-2.5 text-sm transition-colors">
+              {loading ? "Loading demo..." : "Try it now — Continue as Guest"}
+            </button>
+            <button
+              onClick={() => setShowFeatures(false)}
+              className="w-full text-[#8B949E] hover:text-white text-xs mt-3 transition-colors">
+              Skip, I'll sign in myself
+            </button>
+          </div>
+        </div>
+      )}
       {GOOGLE_CLIENT_ID && (
         <Script
           src="https://accounts.google.com/gsi/client"
@@ -196,7 +245,7 @@ export default function LoginPage() {
 
             {mode === "register" && (
               <div>
-                <label className="text-xs text-[#8B949E] mb-1.5 block">Email</label>
+                <label className="text-xs text-[#8B949E] mb-1.5 block">Email (optional)</label>
                 <input
                   type="email"
                   value={email}
@@ -206,7 +255,7 @@ export default function LoginPage() {
                   autoComplete="email"
                   className="w-full bg-[#0D1117] border border-[#30363D] rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-[#00C48C] placeholder-[#8B949E] transition-colors"
                 />
-                <p className="text-[#8B949E] text-xs mt-1">Used for rule/alert notifications only.</p>
+                <p className="text-[#8B949E] text-xs mt-1">Only used for rule/alert notifications — leave blank to skip.</p>
               </div>
             )}
 

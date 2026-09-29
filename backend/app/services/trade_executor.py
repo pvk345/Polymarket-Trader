@@ -5,6 +5,16 @@ from app.core.config import settings
 from app.models.rules import TriggerLog, TradeGuard, Rule
 from app.services.position_sizer import calculate_position_size, confidence_label
 from app.services.notifications import notify_rule_event
+from app.api.auth import get_username_by_id, get_alpaca_credentials
+
+
+def _credentials_for_user(user_id: int | None) -> tuple[str, str]:
+    """Resolve which Alpaca account a rule's trades execute against — the
+    guest account gets its own isolated paper account so demo trades never
+    land in the primary account."""
+    if user_id is None:
+        return settings.alpaca_api_key, settings.alpaca_secret_key
+    return get_alpaca_credentials(get_username_by_id(user_id))
 
 
 def is_market_open() -> bool:
@@ -61,12 +71,12 @@ def _update_guard(rule_id: int, ticker: str, db: Session):
         ))
 
 
-def _get_current_price(ticker: str) -> float | None:
+def _get_current_price(ticker: str, api_key: str | None = None, secret_key: str | None = None) -> float | None:
     try:
         from alpaca.trading.client import TradingClient
         client = TradingClient(
-            settings.alpaca_api_key,
-            settings.alpaca_secret_key,
+            api_key or settings.alpaca_api_key,
+            secret_key or settings.alpaca_secret_key,
             paper=True,
         )
         position = client.get_open_position(ticker)
@@ -75,15 +85,17 @@ def _get_current_price(ticker: str) -> float | None:
         return None
 
 
-def _place_order(ticker: str, qty: float, action: str) -> tuple[bool, str | None, str | None]:
+def _place_order(
+    ticker: str, qty: float, action: str, api_key: str | None = None, secret_key: str | None = None
+) -> tuple[bool, str | None, str | None]:
     try:
         from alpaca.trading.client import TradingClient
         from alpaca.trading.requests import MarketOrderRequest
         from alpaca.trading.enums import OrderSide, TimeInForce
 
         client = TradingClient(
-            settings.alpaca_api_key,
-            settings.alpaca_secret_key,
+            api_key or settings.alpaca_api_key,
+            secret_key or settings.alpaca_secret_key,
             paper=True,
         )
         side = OrderSide.BUY if action == "buy" else OrderSide.SELL
@@ -127,6 +139,7 @@ def execute_trade(trigger: dict, log: TriggerLog, db: Session) -> bool:
         return False
 
     rule = db.query(Rule).filter(Rule.id == rule_id).first()
+    api_key, secret_key = _credentials_for_user(rule.user_id if rule else None)
 
     # ── Position sizing ────────────────────────────────────────────────────────
     if rule and rule.use_dynamic_sizing and rule.max_quantity:
@@ -155,7 +168,7 @@ def execute_trade(trigger: dict, log: TriggerLog, db: Session) -> bool:
     try:
         from app.api.settings import get_setting
         max_usd = float(get_setting("max_trade_size_usd", db))
-        current_price = _get_current_price(ticker)
+        current_price = _get_current_price(ticker, api_key, secret_key)
         if current_price:
             trade_value = sized_qty * current_price
             if trade_value > max_usd:
@@ -169,7 +182,7 @@ def execute_trade(trigger: dict, log: TriggerLog, db: Session) -> bool:
     except Exception:
         pass
 
-    success, order_id, error = _place_order(ticker, sized_qty, action)
+    success, order_id, error = _place_order(ticker, sized_qty, action, api_key, secret_key)
 
     if success:
         log.executed = True
@@ -182,7 +195,7 @@ def execute_trade(trigger: dict, log: TriggerLog, db: Session) -> bool:
             rule.in_position = True
             rule.entry_date = datetime.utcnow()
             rule.actual_quantity = sized_qty
-            current_price = _get_current_price(ticker)
+            current_price = _get_current_price(ticker, api_key, secret_key)
             if current_price:
                 rule.entry_price = current_price
 
@@ -213,6 +226,7 @@ def execute_exit(rule: Rule, reason: str, db: Session) -> bool:
     ticker = rule.ticker
     quantity = rule.actual_quantity or rule.quantity
     exit_action = "sell" if rule.action == "buy" else "buy"
+    api_key, secret_key = _credentials_for_user(rule.user_id)
 
     # ── Market hours check for exits too ──────────────────────────────────────
     if not is_market_open():
@@ -232,7 +246,7 @@ def execute_exit(rule: Rule, reason: str, db: Session) -> bool:
         flush=True,
     )
 
-    success, order_id, error = _place_order(ticker, quantity, exit_action)
+    success, order_id, error = _place_order(ticker, quantity, exit_action, api_key, secret_key)
 
     log = TriggerLog(
         rule_id=rule.id,
@@ -286,7 +300,8 @@ def check_exit_conditions(rule: Rule, current_prob: float, db: Session) -> bool:
             reason = f"Probability rose to {current_prob:.1f}% (above {rule.exit_threshold}%)"
 
     elif rule.exit_condition in ("take_profit", "stop_loss"):
-        current_price = _get_current_price(rule.ticker)
+        api_key, secret_key = _credentials_for_user(rule.user_id)
+        current_price = _get_current_price(rule.ticker, api_key, secret_key)
         if current_price and rule.entry_price:
             if rule.action == "buy":
                 pnl_pct = ((current_price - rule.entry_price) / rule.entry_price) * 100

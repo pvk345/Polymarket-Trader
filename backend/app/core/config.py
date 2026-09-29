@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     alpaca_api_key: str = ""
     alpaca_secret_key: str = ""
     alpaca_paper: bool = True
+    alpaca_guest_api_key: str = ""
+    alpaca_guest_secret_key: str = ""
     auth_username: str = "admin"
     auth_password: str = "changeme123"
     jwt_secret: str = "changeme-use-a-real-secret-in-production"

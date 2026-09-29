@@ -1,16 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.core.config import settings
+from app.api.auth import get_current_user, get_alpaca_credentials
 
 router = APIRouter()
 
 @router.get("/portfolio")
-async def get_portfolio():
+async def get_portfolio(current_user: str = Depends(get_current_user)):
     """Get current paper trading portfolio from Alpaca"""
     try:
         from alpaca.trading.client import TradingClient
+        api_key, secret_key = get_alpaca_credentials(current_user)
         client = TradingClient(
-            settings.alpaca_api_key,
-            settings.alpaca_secret_key,
+            api_key,
+            secret_key,
             paper=settings.alpaca_paper
         )
         account = client.get_account()

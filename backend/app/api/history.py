@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from typing import Optional
 from app.core.database import get_db
 from app.core.config import settings
-from app.models.rules import TriggerLog
+from app.models.rules import TriggerLog, Rule
+from app.api.auth import get_current_user, get_current_user_id, get_alpaca_credentials, GUEST_USERNAME
 
 router = APIRouter()
 
@@ -15,8 +17,21 @@ def get_history(
     sort: str = Query("desc"),
     limit: int = Query(100),
     db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+    user_id: int = Depends(get_current_user_id),
 ):
-    q = db.query(TriggerLog).filter(TriggerLog.executed == True)
+    # Scope trade history by whoever owns the triggering rule — symmetric in
+    # both directions: guest never sees the primary account's trades (or
+    # ownerless/legacy rows), and the primary account never sees guest's.
+    q = (
+        db.query(TriggerLog)
+        .outerjoin(Rule, Rule.id == TriggerLog.rule_id)
+        .filter(TriggerLog.executed == True)
+    )
+    if current_user == GUEST_USERNAME:
+        q = q.filter(Rule.user_id == user_id)
+    else:
+        q = q.filter(or_(Rule.user_id == user_id, Rule.user_id.is_(None)))
 
     if ticker:
         q = q.filter(TriggerLog.ticker == ticker.upper())
@@ -32,9 +47,10 @@ def get_history(
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
 
+        api_key, secret_key = get_alpaca_credentials(current_user)
         client = TradingClient(
-            settings.alpaca_api_key,
-            settings.alpaca_secret_key,
+            api_key,
+            secret_key,
             paper=True,
         )
         orders = client.get_orders(

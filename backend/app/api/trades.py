@@ -1,19 +1,21 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.core.config import settings
+from app.api.auth import get_current_user, get_alpaca_credentials
 
 router = APIRouter()
 
 
 @router.get("/trades")
-def get_trades():
+def get_trades(current_user: str = Depends(get_current_user)):
     try:
         from alpaca.trading.client import TradingClient
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
 
+        api_key, secret_key = get_alpaca_credentials(current_user)
         client = TradingClient(
-            settings.alpaca_api_key,
-            settings.alpaca_secret_key,
+            api_key,
+            secret_key,
             paper=True,
         )
 

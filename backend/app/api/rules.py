@@ -6,7 +6,7 @@ from typing import Optional, List
 import json
 from app.core.database import get_db
 from app.models.rules import Rule, TriggerLog
-from app.api.auth import get_current_user_id
+from app.api.auth import get_current_user_id, get_current_user, get_alpaca_credentials, GUEST_USERNAME
 
 router = APIRouter()
 
@@ -90,7 +90,11 @@ def get_rules(db: Session = Depends(get_db), user_id: int = Depends(get_current_
 
 
 @router.get("/rules/performance")
-def get_rule_performance(db: Session = Depends(get_db)):
+def get_rule_performance(
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+    user_id: int = Depends(get_current_user_id),
+):
     """Compute per-rule P&L by matching entry/exit TriggerLog pairs against Alpaca fills."""
 
     # Fetch all Alpaca orders once
@@ -99,21 +103,26 @@ def get_rule_performance(db: Session = Depends(get_db)):
         from alpaca.trading.client import TradingClient
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
-        from app.core.config import settings
 
-        client = TradingClient(settings.alpaca_api_key, settings.alpaca_secret_key, paper=True)
+        api_key, secret_key = get_alpaca_credentials(current_user)
+        client = TradingClient(api_key, secret_key, paper=True)
         orders = client.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.ALL, limit=500))
         order_map = {str(o.id): o for o in orders}
     except Exception as e:
         print(f"Warning: could not fetch Alpaca orders for performance: {e}")
 
-    # Get all executed logs grouped by rule_id
-    logs = (
+    # Get all executed logs grouped by rule_id — scoped by rule ownership,
+    # symmetric in both directions (see get_history's identical guard for why).
+    logs_q = (
         db.query(TriggerLog)
+        .outerjoin(Rule, Rule.id == TriggerLog.rule_id)
         .filter(TriggerLog.executed == True)
-        .order_by(TriggerLog.triggered_at.asc())
-        .all()
     )
+    if current_user == GUEST_USERNAME:
+        logs_q = logs_q.filter(Rule.user_id == user_id)
+    else:
+        logs_q = logs_q.filter(or_(Rule.user_id == user_id, Rule.user_id.is_(None)))
+    logs = logs_q.order_by(TriggerLog.triggered_at.asc()).all()
 
     # Group logs by rule_id
     by_rule: dict[int, list] = {}

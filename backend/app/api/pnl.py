@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.core.config import settings
+from app.api.auth import get_current_user, get_alpaca_credentials
 
 router = APIRouter()
 
 
 @router.get("/pnl")
-def get_pnl():
+def get_pnl(current_user: str = Depends(get_current_user)):
     """
     Calculate overall P&L from Alpaca paper trading account.
     Combines realized P&L from closed orders + unrealized P&L from open positions.
@@ -15,9 +16,10 @@ def get_pnl():
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
 
+        api_key, secret_key = get_alpaca_credentials(current_user)
         client = TradingClient(
-            settings.alpaca_api_key,
-            settings.alpaca_secret_key,
+            api_key,
+            secret_key,
             paper=True,
         )
 
